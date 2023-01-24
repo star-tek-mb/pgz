@@ -13,6 +13,7 @@ jobs:
           POSTGRES_PASSWORD: testing
           POSTGRES_DB: testing
           POSTGRES_HOST_AUTH_METHOD: md5
+          POSTGRES_INITDB_ARGS: auth-host=md5
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
