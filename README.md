@@ -6,11 +6,8 @@
 
 - Optimize allocations (use stack fallback allocator for messages)
 - Fix all todos
-- Prepared statements
-- Connection pools
-- Proper decoding/encoding to/of Zig values
+- Connection pools (do we need them?)
 - Complete and test in production?
-- Reorganize API
 
 # Testing
 
