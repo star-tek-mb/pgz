@@ -87,7 +87,7 @@ pub const Connection = struct {
         defer wb.deinit();
         wb.writeString(sql);
         try wb.send(self.stream);
-        return self.readRows(T);
+        return self.fetchRows(T);
     }
 
     pub fn prepare(self: *Connection, sql: []const u8) !Statement {
@@ -176,7 +176,7 @@ pub const Connection = struct {
         }
     }
 
-    fn readRows(self: *Connection, comptime T: type) !QueryResult(T) {
+    fn fetchRows(self: *Connection, comptime T: type) !QueryResult(T) {
         var affectedRows: u32 = 0;
         // TODO: do we need this headers? can we use struct order?
         var row_headers = try std.ArrayListUnmanaged(RowHeader).initCapacity(self.allocator, 10);
@@ -293,7 +293,7 @@ pub const Statement = struct {
 
     pub fn query(self: *Statement, comptime T: type, args: anytype) !QueryResult(T) {
         try self.sendExec(args);
-        return try self.connection.readRows(T);
+        return try self.connection.fetchRows(T);
     }
 
     fn sendExec(self: *Statement, args: anytype) !void {
