@@ -49,7 +49,7 @@ pub const Connection = struct {
             .allocator = allocator,
             .stream = undefined,
         };
-        connection.stream = try std.net.tcpConnectToHost(allocator, dsn.host orelse "127.0.0.1", dsn.port orelse 5432);
+        connection.stream = try std.net.tcpConnectToHost(allocator, dsn.host orelse "localhost", dsn.port orelse 5432);
         try connection.startup(dsn.user orelse "postgres", dsn.path[1..]);
         while (true) {
             var msg = try Message.read(allocator, connection.stream.reader());
@@ -353,18 +353,18 @@ fn parseAffectedRows(command: []const u8) u32 {
 }
 
 test "connect" {
-    var conn = try Connection.init(std.testing.allocator, try std.Uri.parse("postgres://testing:testing@postgres:5432/testing"));
+    var conn = try Connection.init(std.testing.allocator, try std.Uri.parse("postgres://testing:testing@localhost:5432/testing"));
     defer conn.deinit();
 }
 
 test "exec" {
-    var conn = try Connection.init(std.testing.allocator, try std.Uri.parse("postgres://testing:testing@postgres:5432/testing"));
+    var conn = try Connection.init(std.testing.allocator, try std.Uri.parse("postgres://testing:testing@localhost:5432/testing"));
     defer conn.deinit();
     try conn.exec("SELECT 1;");
 }
 
 test "query" {
-    var conn = try Connection.init(std.testing.allocator, try std.Uri.parse("postgres://testing:testing@postgres:5432/testing"));
+    var conn = try Connection.init(std.testing.allocator, try std.Uri.parse("postgres://testing:testing@localhost:5432/testing"));
     defer conn.deinit();
     var queryResult = try conn.query("SELECT 1;", struct { result: u8 });
     defer queryResult.deinit();
@@ -373,7 +373,7 @@ test "query" {
 }
 
 test "prepare" {
-    var conn = try Connection.init(std.testing.allocator, try std.Uri.parse("postgres://testing:testing@postgres:5432/testing"));
+    var conn = try Connection.init(std.testing.allocator, try std.Uri.parse("postgres://testing:testing@localhost:5432/testing"));
     defer conn.deinit();
     var stmt = try conn.prepare("SELECT 1 + $1;");
     defer stmt.deinit();
@@ -384,7 +384,7 @@ test "prepare" {
 }
 
 test "prepare exec many times" {
-    var conn = try Connection.init(std.testing.allocator, try std.Uri.parse("postgres://testing:testing@postgres:5432/testing"));
+    var conn = try Connection.init(std.testing.allocator, try std.Uri.parse("postgres://testing:testing@localhost:5432/testing"));
     defer conn.deinit();
     var stmt = try conn.prepare("SELECT 1 + $1;");
     defer stmt.deinit();
@@ -394,7 +394,7 @@ test "prepare exec many times" {
 }
 
 test "encoding decoding null" {
-    var conn = try Connection.init(std.testing.allocator, try std.Uri.parse("postgres://testing:testing@postgres:5432/testing"));
+    var conn = try Connection.init(std.testing.allocator, try std.Uri.parse("postgres://testing:testing@localhost:5432/testing"));
     defer conn.deinit();
     var stmt = try conn.prepare("SELECT $1;");
     defer stmt.deinit();
