@@ -6,9 +6,8 @@ pub fn build(b: *std.build.Builder) void {
     lib.setBuildMode(mode);
     lib.install();
 
-    const main_tests = b.addTestExe("test", "src/pgz.zig");
+    const main_tests = b.addTest("src/pgz.zig");
     main_tests.setBuildMode(mode);
-    main_tests.install();
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&main_tests.step);
 }

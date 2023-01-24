@@ -24,12 +24,14 @@ pub fn QueryResult(comptime T: type) type {
         affectedRows: u32,
 
         pub fn deinit(self: *@This()) void {
-            inline for (@typeInfo(T).Struct.fields) |field| {
-                if (@typeInfo(field.type) == .Pointer) {
-                    self.allocator.free(@field(self.data, field.name));
-                }
-                if (@typeInfo(field.type) == .Optional and @typeInfo(@typeInfo(field.type).Optional.child) == .Pointer and @field(self.data, field.name) != null) {
-                    self.allocator.free(@field(self.data, field.name));
+            for (self.data) |row| {
+                inline for (@typeInfo(T).Struct.fields) |field| {
+                    if (@typeInfo(field.type) == .Pointer) {
+                        self.allocator.free(@field(row, field.name));
+                    }
+                    if (@typeInfo(field.type) == .Optional and @typeInfo(@typeInfo(field.type).Optional.child) == .Pointer and @field(row, field.name) != null) {
+                        self.allocator.free(@field(row, field.name));
+                    }
                 }
             }
             self.allocator.free(self.data);
@@ -376,10 +378,10 @@ test "prepare" {
     defer conn.deinit();
     var stmt = try conn.prepare("SELECT 1 + $1;");
     defer stmt.deinit();
-    var queryResult = try stmt.query(struct { result: u8 }, .{2});
+    var queryResult = try stmt.query(struct { result: []const u8 }, .{2});
     defer queryResult.deinit();
     try std.testing.expectEqual(@as(usize, 1), queryResult.data.len);
-    try std.testing.expectEqual(@as(u8, 3), queryResult.data[0].result);
+    try std.testing.expectEqualStrings("3", queryResult.data[0].result);
 }
 
 test "prepare exec many times" {
