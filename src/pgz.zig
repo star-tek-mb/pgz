@@ -15,10 +15,6 @@ const RowHeader = struct {
     binary: bool,
 };
 
-const Row = struct {
-    value: ?[]const u8 = null,
-};
-
 pub fn QueryResult(comptime T: type) type {
     return struct {
         allocator: std.mem.Allocator,
@@ -189,7 +185,7 @@ pub const Connection = struct {
 
     fn fetchRows(self: *Connection, comptime T: type) !QueryResult(T) {
         var affectedRows: u32 = 0;
-        // TODO: do we need this headers? can we use struct order?
+
         var row_headers = try std.ArrayListUnmanaged(RowHeader).initCapacity(self.allocator, 10);
         defer {
             for (row_headers.items) |row_header| {
@@ -197,9 +193,6 @@ pub const Connection = struct {
             }
             row_headers.clearAndFree(self.allocator);
         }
-
-        var rows = try std.ArrayListUnmanaged(Row).initCapacity(self.allocator, 10);
-        defer rows.clearAndFree(self.allocator);
 
         var result = try std.ArrayListUnmanaged(T).initCapacity(self.allocator, 10);
         defer result.deinit(self.allocator);
@@ -239,22 +232,39 @@ pub const Connection = struct {
                 'D' => {
                     var buffer = ReadBuffer.init(msg.msg);
                     var num_rows = buffer.readInt(u16);
-                    try rows.ensureTotalCapacity(self.allocator, num_rows);
+                    if (num_rows > @typeInfo(T).Struct.fields.len) return error.ScanMismatch;
+
+                    var scanned: usize = 0;
+                    var row: T = undefined;
                     var i: usize = 0;
+
                     while (i < num_rows) : (i += 1) {
                         var len = buffer.readInt(u32);
+                        var value: ?[]const u8 = undefined;
                         if (len == @truncate(u32, -1)) {
-                            try rows.append(self.allocator, Row{ .value = null });
+                            value = null;
                         } else {
-                            var buf = buffer.readBytes(len);
-                            try rows.append(self.allocator, Row{ .value = buf });
+                            value = buffer.readBytes(len);
+                        }
+
+                        if (@typeInfo(T).Struct.is_tuple) {
+                            inline for (@typeInfo(T).Struct.fields) |field, j| {
+                                if (i == j) {
+                                    @field(row, field.name) = try encdec.decode(self.allocator, value, field.type);
+                                    scanned += 1;
+                                }
+                            }
+                        } else {
+                            inline for (@typeInfo(T).Struct.fields) |field, j| {
+                                if (i == j and std.mem.eql(u8, row_headers.items[i].name, field.name)) {
+                                    @field(row, field.name) = try encdec.decode(self.allocator, value, field.type);
+                                    scanned += 1;
+                                }
+                            }
                         }
                     }
-                    // TODO: named scan
-                    var row: T = undefined;
-                    inline for (@typeInfo(T).Struct.fields) |field, j| {
-                        @field(row, field.name) = try encdec.decode(self.allocator, rows.items[j].value, field.type);
-                    }
+
+                    if (scanned != @typeInfo(T).Struct.fields.len) return error.ScanMismatch;
                     try result.append(self.allocator, row);
                 },
                 else => {},
@@ -338,9 +348,7 @@ pub const Statement = struct {
 };
 
 fn parseAffectedRows(command: []const u8) u32 {
-    if (command.len == 0) {
-        return 0;
-    }
+    if (command.len == 0) return 0;
 
     var tokenizer = std.mem.tokenize(u8, command, " ");
     _ = tokenizer.next(); // INSERT or SELECT
@@ -367,10 +375,41 @@ test "exec" {
 test "query" {
     var conn = try Connection.init(std.testing.allocator, try std.Uri.parse("postgres://testing:testing@localhost:5432/testing"));
     defer conn.deinit();
-    var queryResult = try conn.query("SELECT 1;", struct { result: u8 });
-    defer queryResult.deinit();
-    try std.testing.expectEqual(@as(usize, 1), queryResult.data.len);
-    try std.testing.expectEqual(@as(u8, 1), queryResult.data[0].result);
+    var result = try conn.query("SELECT 1;", struct { u8 });
+    defer result.deinit();
+    try std.testing.expectEqual(@as(usize, 1), result.data.len);
+    try std.testing.expectEqual(@as(u8, 1), result.data[0].@"0");
+}
+
+test "query named" {
+    var conn = try Connection.init(std.testing.allocator, try std.Uri.parse("postgres://testing:testing@localhost:5432/testing"));
+    defer conn.deinit();
+    var result = try conn.query("SELECT 1 as number;", struct { number: u8 });
+    defer result.deinit();
+    try std.testing.expectEqual(@as(usize, 1), result.data.len);
+    try std.testing.expectEqual(@as(u8, 1), result.data[0].number);
+}
+
+test "query multiple rows" {
+    var conn = try Connection.init(std.testing.allocator, try std.Uri.parse("postgres://testing:testing@localhost:5432/testing"));
+    defer conn.deinit();
+    var result = try conn.query("VALUES (1,2,3), (4,5,6), (7,8,9);", struct { u8, u8, u8 });
+    defer result.deinit();
+    try std.testing.expectEqual(@as(usize, 3), result.data.len);
+    try std.testing.expectEqual(@as(u8, 1), result.data[0].@"0");
+    try std.testing.expectEqual(@as(u8, 4), result.data[1].@"0");
+    try std.testing.expectEqual(@as(u8, 7), result.data[2].@"0");
+}
+
+test "query multiple named rows" {
+    var conn = try Connection.init(std.testing.allocator, try std.Uri.parse("postgres://testing:testing@localhost:5432/testing"));
+    defer conn.deinit();
+    var result = try conn.query("VALUES (1,2,3), (4,5,6), (7,8,9);", struct { column1: u8, column2: u8, column3: u8 });
+    defer result.deinit();
+    try std.testing.expectEqual(@as(usize, 3), result.data.len);
+    try std.testing.expectEqual(@as(u8, 1), result.data[0].column1);
+    try std.testing.expectEqual(@as(u8, 5), result.data[1].column2);
+    try std.testing.expectEqual(@as(u8, 9), result.data[2].column3);
 }
 
 test "prepare" {
@@ -378,10 +417,10 @@ test "prepare" {
     defer conn.deinit();
     var stmt = try conn.prepare("SELECT 1 + $1;");
     defer stmt.deinit();
-    var queryResult = try stmt.query(struct { result: []const u8 }, .{2});
-    defer queryResult.deinit();
-    try std.testing.expectEqual(@as(usize, 1), queryResult.data.len);
-    try std.testing.expectEqualStrings("3", queryResult.data[0].result);
+    var result = try stmt.query(struct { []const u8 }, .{2});
+    defer result.deinit();
+    try std.testing.expectEqual(@as(usize, 1), result.data.len);
+    try std.testing.expectEqualStrings("3", result.data[0].@"0");
 }
 
 test "prepare exec many times" {
@@ -389,9 +428,9 @@ test "prepare exec many times" {
     defer conn.deinit();
     var stmt = try conn.prepare("SELECT 1 + $1;");
     defer stmt.deinit();
-    try stmt.exec(.{ 1 });
-    try stmt.exec(.{ 2 });
-    try stmt.exec(.{ 3 });
+    try stmt.exec(.{1});
+    try stmt.exec(.{2});
+    try stmt.exec(.{3});
 }
 
 test "encoding decoding null" {
@@ -400,8 +439,8 @@ test "encoding decoding null" {
     var stmt = try conn.prepare("SELECT $1;");
     defer stmt.deinit();
     var a: ?u32 = null;
-    var queryResult = try stmt.query(struct { result: ?u8 }, .{a});
-    defer queryResult.deinit();
-    try std.testing.expectEqual(@as(usize, 1), queryResult.data.len);
-    try std.testing.expectEqual(@as(?u8, null), queryResult.data[0].result);
+    var result = try stmt.query(struct { ?u8 }, .{a});
+    defer result.deinit();
+    try std.testing.expectEqual(@as(usize, 1), result.data.len);
+    try std.testing.expectEqual(@as(?u8, null), result.data[0].@"0");
 }

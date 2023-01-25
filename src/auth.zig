@@ -1,3 +1,6 @@
+// TODO: do not hardcode array sizes
+// TODO: tidy this code
+
 const std = @import("std");
 const messaging = @import("messaging.zig");
 const WriteBuffer = messaging.WriteBuffer;
