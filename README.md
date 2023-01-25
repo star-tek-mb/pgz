@@ -8,6 +8,7 @@
 - Fix all todos
 - Connection pools (do we need them?)
 - Complete and test in production?
+- Log errors? Provide diagnostics?
 
 # Testing
 

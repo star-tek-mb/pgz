@@ -58,8 +58,8 @@ pub const Connection = struct {
             defer msg.free(allocator);
             switch (msg.type) {
                 'R' => try connection.handleAuth(msg, dsn.user orelse "postgres", dsn.password orelse ""),
-                'K' => {},
-                'S' => {},
+                'K' => {}, // TODO: handle
+                'S' => {}, // TODO: handle
                 'Z' => break,
                 else => return error.UnexpectedMessage,
             }
@@ -139,52 +139,51 @@ pub const Connection = struct {
         try wb.send(self.stream);
     }
 
-    // TODO: other auth methods
     fn handleAuth(self: *Connection, msg: Message, user: []const u8, password: []const u8) !void {
-        var scram = auth.Scram.init(password);
-        switch (msg.type) {
-            'R' => {
-                var buffer = ReadBuffer.init(msg.msg);
-                var password_type = buffer.readInt(u32);
-                switch (password_type) {
-                    0 => {},
-                    5 => {
-                        var salt = buffer.readBytes(4);
+        if (msg.type != 'R') return error.UnexpectedMessage;
 
-                        var md5 = auth.md5(user, password, salt);
-                        var wb = try WriteBuffer.init(self.allocator, 'p');
-                        defer wb.deinit();
-                        wb.writeString(&md5);
-                        try wb.send(self.stream);
+        var buffer = ReadBuffer.init(msg.msg);
+        var password_type = buffer.readInt(u32);
+        switch (password_type) {
+            0 => {},
+            5 => {
+                var salt = buffer.readBytes(4);
 
-                        var check_msg = try Message.read(self.allocator, self.stream.reader());
-                        defer check_msg.free(self.allocator);
-                        var check_buffer = ReadBuffer.init(check_msg.msg);
-                        var status = check_buffer.readInt(u32);
-                        if (status != 0) return error.AuthenticationError;
-                    },
-                    10 => {
-                        var wb = try WriteBuffer.init(self.allocator, 'p');
-                        defer wb.deinit();
-                        scram.state.writeTo(&wb);
-                        try wb.send(self.stream);
+                var md5 = auth.md5(user, password, salt);
+                var wb = try WriteBuffer.init(self.allocator, 'p');
+                defer wb.deinit();
+                wb.writeString(&md5);
+                try wb.send(self.stream);
 
-                        var server_first = try Message.read(self.allocator, self.stream.reader());
-                        defer server_first.free(self.allocator);
-                        try scram.update(server_first.msg[4..]);
-
-                        wb.reset('p');
-                        scram.state.writeTo(&wb);
-                        try wb.send(self.stream);
-
-                        var server_final = try Message.read(self.allocator, self.stream.reader());
-                        defer server_final.free(self.allocator);
-                        try scram.finish(server_final.msg[4..]);
-                    },
-                    else => return error.UnsupportedAuthentication,
-                }
+                var check_msg = try Message.read(self.allocator, self.stream.reader());
+                defer check_msg.free(self.allocator);
+                var check_buffer = ReadBuffer.init(check_msg.msg);
+                var status = check_buffer.readInt(u32);
+                if (status != 0) return error.AuthenticationError;
             },
-            else => return error.UnexpectedMessage,
+            10 => {
+                var scram = auth.Scram.init(password);
+
+                var wb = try WriteBuffer.init(self.allocator, 'p');
+                defer wb.deinit();
+                scram.state.writeTo(&wb);
+                try wb.send(self.stream);
+
+                var server_first = try Message.read(self.allocator, self.stream.reader());
+                defer server_first.free(self.allocator);
+                if (server_first.type != 'R') return error.AuthenticationError;
+                scram.update(server_first.msg[4..]) catch return error.AuthenticationError;
+
+                wb.reset('p');
+                scram.state.writeTo(&wb);
+                try wb.send(self.stream);
+
+                var server_final = try Message.read(self.allocator, self.stream.reader());
+                defer server_final.free(self.allocator);
+                if (server_final.type != 'R') return error.AuthenticationError;
+                scram.finish(server_final.msg[4..]) catch return error.AuthenticationError;
+            },
+            else => return error.AuthenticationError, // TODO: handle other auth methods
         }
     }
 
