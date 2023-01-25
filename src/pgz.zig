@@ -1,8 +1,10 @@
 const std = @import("std");
 const encdec = @import("encdec.zig");
+const messaging = @import("messaging.zig");
+const auth = @import("auth.zig");
+
 pub const quoteIdentifier = encdec.quoteIdentifier;
 pub const quoteLiteral = encdec.quoteLiteral;
-const messaging = @import("messaging.zig");
 const ReadBuffer = messaging.ReadBuffer;
 const WriteBuffer = messaging.WriteBuffer;
 const Message = messaging.Message;
@@ -139,6 +141,7 @@ pub const Connection = struct {
 
     // TODO: other auth methods
     fn handleAuth(self: *Connection, msg: Message, user: []const u8, password: []const u8) !void {
+        var scram = auth.Scram.init(password);
         switch (msg.type) {
             'R' => {
                 var buffer = ReadBuffer.init(msg.msg);
@@ -147,21 +150,11 @@ pub const Connection = struct {
                     0 => {},
                     5 => {
                         var salt = buffer.readBytes(4);
-                        var digest: [16]u8 = undefined;
 
-                        var md5 = std.crypto.hash.Md5.init(.{});
-                        md5.update(password);
-                        md5.update(user);
-                        md5.final(&digest);
-                        md5 = std.crypto.hash.Md5.init(.{});
-                        md5.update(&hexDigest(16, digest));
-                        md5.update(salt);
-                        md5.final(&digest);
-                        var final_hash = "md5" ++ hexDigest(16, digest);
-
+                        var md5 = auth.md5(user, password, salt);
                         var wb = try WriteBuffer.init(self.allocator, 'p');
                         defer wb.deinit();
-                        wb.writeString(final_hash);
+                        wb.writeString(&md5);
                         try wb.send(self.stream);
 
                         var check_msg = try Message.read(self.allocator, self.stream.reader());
@@ -169,6 +162,24 @@ pub const Connection = struct {
                         var check_buffer = ReadBuffer.init(check_msg.msg);
                         var status = check_buffer.readInt(u32);
                         if (status != 0) return error.AuthenticationError;
+                    },
+                    10 => {
+                        var wb = try WriteBuffer.init(self.allocator, 'p');
+                        defer wb.deinit();
+                        scram.state.writeTo(&wb);
+                        try wb.send(self.stream);
+
+                        var server_first = try Message.read(self.allocator, self.stream.reader());
+                        defer server_first.free(self.allocator);
+                        try scram.update(server_first.msg[4..]);
+
+                        wb.reset('p');
+                        scram.state.writeTo(&wb);
+                        try wb.send(self.stream);
+
+                        var server_final = try Message.read(self.allocator, self.stream.reader());
+                        defer server_final.free(self.allocator);
+                        try scram.finish(server_final.msg[4..]);
                     },
                     else => return error.UnsupportedAuthentication,
                 }
@@ -325,16 +336,6 @@ pub const Statement = struct {
         try wb.send(self.connection.stream);
     }
 };
-
-const hex_charset = "0123456789abcdef";
-fn hexDigest(comptime size: comptime_int, digest: [size]u8) [size * 2]u8 {
-    var ret: [size * 2]u8 = undefined;
-    for (digest) |byte, i| {
-        ret[i * 2 + 0] = hex_charset[byte >> 4];
-        ret[i * 2 + 1] = hex_charset[byte & 15];
-    }
-    return ret;
-}
 
 fn parseAffectedRows(command: []const u8) u32 {
     if (command.len == 0) {
