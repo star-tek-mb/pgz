@@ -250,6 +250,7 @@ pub const Connection = struct {
                             try rows.append(self.allocator, Row{ .value = buf });
                         }
                     }
+                    // TODO: named scan
                     var row: T = undefined;
                     inline for (@typeInfo(T).Struct.fields) |field, j| {
                         @field(row, field.name) = try encdec.decode(self.allocator, rows.items[j].value, field.type);

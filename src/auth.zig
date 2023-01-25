@@ -190,8 +190,8 @@ fn hi(string: []const u8, salt: []const u8, iterations: usize) [32]u8 {
 
     result = previous;
 
-    var i: usize = 0;
-    while (i < iterations - 1) : (i += 1) {
+    var i: usize = 1;
+    while (i < iterations) : (i += 1) {
         var hmac_iter = std.crypto.auth.hmac.sha2.HmacSha256.init(string);
         hmac_iter.update(&previous);
         hmac_iter.final(&previous);
