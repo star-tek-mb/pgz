@@ -13,12 +13,20 @@ const std = @import("std");
 const Connection = @import("pgz.zig").Connection;
 
 pub fn main() !void {
-    var connection = try Connection.init(std.heap.page_allocator, try std.Uri.parse("postgres://testing:testing@localhost:5432/testing"));
+    var dsn = try std.Uri.parse("postgres://testing:testing@localhost:5432/testing");
+    var connection = try Connection.init(std.heap.page_allocator, dsn);
     defer connection.deinit();
-    var result = try connection.query("SELECT 1 as number;", struct { number: u8 });
+    var result = try connection.query("SELECT 1 as number;", struct { number: ?[]const u8 });
     defer result.deinit();
 
-    try std.io.getStdOut().writer().print("number = {d}\n", .{result.data[0].number});
+    try connection.exec("CREATE TABLE users(name text not null);");
+    defer connection.exec("DROP TABLE users;") catch {};
+    var stmt = try connection.prepare("INSERT INTO users(name) VALUES($1);");
+    defer stmt.deinit();
+    try stmt.exec(.{"hello"});
+    try stmt.exec(.{"world"});
+
+    try std.io.getStdOut().writer().print("number = {s}\n", .{result.data[0].number.?});
 }
 ```
 
@@ -35,3 +43,5 @@ pub fn main() !void {
 Create user `testing` with password `testing`.
 
 Create database `testing`.
+
+Run `zig build test`
