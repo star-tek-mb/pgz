@@ -9,6 +9,31 @@ const ReadBuffer = messaging.ReadBuffer;
 const WriteBuffer = messaging.WriteBuffer;
 const Message = messaging.Message;
 
+const Error = struct {
+    severity: [5]u8 = undefined,
+    code: [5]u8 = undefined,
+    message: [128]u8 = undefined,
+    length: u32 = 0,
+
+    pub const Severity = enum {
+        ERROR,
+        FATAL,
+        PANIC,
+    };
+
+    pub fn getSeverity(self: *const Error) Severity {
+        return std.meta.stringToEnum(Severity, self.severity[0..]).?;
+    }
+
+    pub fn getCode(self: *const Error) []const u8 {
+        return self.code[0..];
+    }
+
+    pub fn getMessage(self: *const Error) []const u8 {
+        return self.message[0..self.length];
+    }
+};
+
 const RowHeader = struct {
     name: []const u8,
     type: u32,
@@ -41,6 +66,7 @@ pub const Connection = struct {
     allocator: std.mem.Allocator,
     stream: std.net.Stream,
     statement_count: u32 = 0,
+    @"error": ?Error = null,
 
     pub fn init(allocator: std.mem.Allocator, dsn: std.Uri) !Connection {
         var connection = Connection{
@@ -63,6 +89,10 @@ pub const Connection = struct {
         return connection;
     }
 
+    pub fn getLastError(self: *Connection) Error {
+        return self.@"error".?;
+    }
+
     pub fn exec(self: *Connection, sql: []const u8) !void {
         var wb = try WriteBuffer.init(self.allocator, 'Q');
         defer wb.deinit();
@@ -73,7 +103,10 @@ pub const Connection = struct {
             var msg = try Message.read(self.allocator, self.stream.reader());
             defer msg.free(self.allocator);
             switch (msg.type) {
-                'E' => return error.SqlExecuteError,
+                'E' => {
+                    self.parseError(msg);
+                    return error.SqlExecuteError;
+                },
                 'Z' => break,
                 else => {},
             }
@@ -109,7 +142,10 @@ pub const Connection = struct {
             var msg = try Message.read(self.allocator, self.stream.reader());
             defer msg.free(self.allocator);
             switch (msg.type) {
-                'E' => return error.SqlPrepareError,
+                'E' => {
+                    self.parseError(msg);
+                    return error.SqlPrepareError;
+                },
                 'Z' => break,
                 else => {},
             }
@@ -207,7 +243,10 @@ pub const Connection = struct {
                         affectedRows = parseAffectedRows(buffer.readString());
                     }
                 },
-                'E' => return error.SqlQueryError,
+                'E' => {
+                    self.parseError(msg);
+                    return error.SqlQueryError;
+                },
                 'Z' => break,
                 'T' => {
                     var buffer = ReadBuffer.init(msg.msg);
@@ -277,6 +316,35 @@ pub const Connection = struct {
         };
     }
 
+    fn parseError(self: *Connection, msg: Message) void {
+        self.@"error" = Error{};
+
+        var rb = ReadBuffer.init(msg.msg);
+        var code = rb.readInt(u8);
+        while (code != 0) : (code = rb.readInt(u8)) {
+            switch (code) {
+                'S', 'V' => {
+                    std.mem.copy(u8, self.@"error".?.severity[0..], rb.readString());
+                },
+                'C' => {
+                    std.mem.copy(u8, self.@"error".?.code[0..], rb.readString());
+                },
+                'M' => {
+                    var message = rb.readString();
+                    if (message.len > 256) {
+                        self.@"error".?.length = 0;
+                    } else {
+                        self.@"error".?.length = @intCast(u32, message.len);
+                        std.mem.copy(u8, self.@"error".?.message[0..], message);
+                    }
+                },
+                else => {
+                    _ = rb.readString();
+                },
+            }
+        }
+    }
+
     fn notifyClose(self: *Connection) !void {
         var wb = try WriteBuffer.init(self.allocator, 'X');
         defer wb.deinit();
@@ -306,7 +374,10 @@ pub const Statement = struct {
             var msg = try Message.read(self.connection.allocator, self.connection.stream.reader());
             defer msg.free(self.connection.allocator);
             switch (msg.type) {
-                'E' => return error.SqlExecuteError,
+                'E' => {
+                    self.connection.parseError(msg);
+                    return error.SqlExecuteError;
+                },
                 'Z' => break,
                 else => {},
             }
@@ -440,9 +511,18 @@ test "encoding decoding null" {
     defer stmt.deinit();
     var a: ?u32 = null;
     var b: ?[]const u8 = "hi";
-    var result = try stmt.query(struct { ?u8, ?[]const u8 }, .{a, b});
+    var result = try stmt.query(struct { ?u8, ?[]const u8 }, .{ a, b });
     defer result.deinit();
     try std.testing.expectEqual(@as(usize, 1), result.data.len);
     try std.testing.expectEqual(@as(?u8, null), result.data[0].@"0");
     try std.testing.expectEqualStrings("hi", result.data[0].@"1".?);
+}
+
+test "get last error" {
+    var conn = try Connection.init(std.testing.allocator, try std.Uri.parse("postgres://testing:testing@localhost:5432/testing"));
+    defer conn.deinit();
+    conn.exec("SELECT 1/0;") catch {
+        try std.testing.expectEqual(Error.Severity.ERROR, conn.getLastError().getSeverity());
+        try std.testing.expectEqualStrings("division by zero", conn.getLastError().getMessage());
+    };
 }

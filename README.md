@@ -36,7 +36,6 @@ pub fn main() !void {
 - Fix all todos in code
 - Connection pools (do we need them?)
 - Complete and test in production?
-- Log errors? Provide diagnostics?
 
 # Testing
 
