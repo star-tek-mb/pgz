@@ -16,49 +16,86 @@ fn hexEncode(allocator: std.mem.Allocator, string: []const u8) []const u8 {
 
 /// caller owns memory
 pub fn encode(allocator: std.mem.Allocator, value: anytype) ![]const u8 {
-    switch (@TypeOf(value)) {
-        bool => {
+    switch (@typeInfo(@TypeOf(value))) {
+        .Bool => {
             return try std.fmt.allocPrint(allocator, "{}", .{value});
         },
-        comptime_int, i8, u8, i16, u16, i32, u32, i64, u64, usize, comptime_float, f32, f64 => {
-            return try std.fmt.allocPrint(allocator, "{d}", .{value});
+        .Float, .ComptimeFloat, .Int, .ComptimeInt, .Enum => {
+            return try std.fmt.allocPrint(allocator, "{}", .{value});
         },
-        []const u8 => {
-            return hexEncode(allocator, value);
+        .Optional => {
+            return encode(allocator, value.?); // value is definitely not null
         },
-        else => {
-            return error.EncodeError;
+        .Array => |array| {
+            if (array.child == u8) {
+                return try allocator.dupe(u8, value);
+            }
         },
+        .Pointer => |pointer| {
+            switch (pointer.size) {
+                .One => {
+                    if (@typeInfo(pointer.child) == .Array and @typeInfo(pointer.child).Array.child == u8) {
+                        return try allocator.dupe(u8, value);
+                    }
+                },
+                .Slice => {
+                    if (pointer.child == u8) {
+                        return try allocator.dupe(u8, value);
+                    }
+                },
+                else => {},
+            }
+        },
+        else => {},
     }
+    return error.EncodeError;
 }
 
 /// caller owns memory
 pub fn decode(allocator: std.mem.Allocator, string: ?[]const u8, comptime T: type) !T {
-    if (string) |s| {
-        switch (T) {
-            bool => {
-                return s[0] == 't';
-            },
-            []const u8 => {
-                return try allocator.dupe(u8, s);
-            },
-            i8, u8, i16, u16, i32, u32, i64, u64, usize => {
-                return try std.fmt.parseInt(T, s, 10);
-            },
-            f32, f64 => {
-                return try std.fmt.parseFloat(T, s);
-            },
-            else => {
-                return error.DecodeError;
-            },
-        }
-    } else {
-        if (@typeInfo(T) == .Optional) {
-            return null;
-        } else {
-            return error.DecodeError;
-        }
+    if (string == null and @typeInfo(T) == .Optional) return null;
+    if (string == null and @typeInfo(T) != .Optional) return error.DecodeError;
+
+    switch (@typeInfo(T)) {
+        .Bool => {
+            return string.?[0] == 't';
+        },
+        .Float, .ComptimeFloat => {
+            return try std.fmt.parseFloat(T, string.?);
+        },
+        .Int, .ComptimeInt => {
+            return try std.fmt.parseInt(T, string.?, 10);
+        },
+        .Optional => |optional| {
+            if (string == null) {
+                return null;
+            } else {
+                return try decode(allocator, string, optional.child);
+            }
+        },
+        .Array => |array| {
+            if (array.child == u8) {
+                return try allocator.dupe(u8, string.?);
+            }
+        },
+        .Pointer => |pointer| {
+            switch (pointer.size) {
+                .One => {
+                    if (@typeInfo(pointer.child) == .Array and @typeInfo(pointer.child).Array.child == u8) {
+                        return try allocator.dupe(u8, string.?);
+                    }
+                },
+                .Slice => {
+                    if (pointer.child == u8) {
+                        return try allocator.dupe(u8, string.?);
+                    }
+                },
+                else => {},
+            }
+        },
+        else => {},
     }
+    return error.DecodeError;
 }
 
 /// caller owns memory

@@ -28,7 +28,7 @@ pub fn QueryResult(comptime T: type) type {
                         self.allocator.free(@field(row, field.name));
                     }
                     if (@typeInfo(field.type) == .Optional and @typeInfo(@typeInfo(field.type).Optional.child) == .Pointer and @field(row, field.name) != null) {
-                        self.allocator.free(@field(row, field.name));
+                        self.allocator.free(@field(row, field.name).?);
                     }
                 }
             }
@@ -436,11 +436,13 @@ test "prepare exec many times" {
 test "encoding decoding null" {
     var conn = try Connection.init(std.testing.allocator, try std.Uri.parse("postgres://testing:testing@localhost:5432/testing"));
     defer conn.deinit();
-    var stmt = try conn.prepare("SELECT $1;");
+    var stmt = try conn.prepare("SELECT $1, $2;");
     defer stmt.deinit();
     var a: ?u32 = null;
-    var result = try stmt.query(struct { ?u8 }, .{a});
+    var b: ?[]const u8 = "hi";
+    var result = try stmt.query(struct { ?u8, ?[]const u8 }, .{a, b});
     defer result.deinit();
     try std.testing.expectEqual(@as(usize, 1), result.data.len);
     try std.testing.expectEqual(@as(?u8, null), result.data[0].@"0");
+    try std.testing.expectEqualStrings("hi", result.data[0].@"1".?);
 }
