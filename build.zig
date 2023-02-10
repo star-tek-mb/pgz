@@ -22,6 +22,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    main_tests.emit_docs = .emit;
 
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&main_tests.step);

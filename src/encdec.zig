@@ -98,7 +98,7 @@ pub fn decode(allocator: std.mem.Allocator, string: ?[]const u8, comptime T: typ
     return error.DecodeError;
 }
 
-/// caller owns memory
+/// Quotes identifier, caller owns memory
 pub fn quoteIdentifier(allocator: std.mem.Allocator, identifier: []const u8) ![]const u8 {
     var buf = try std.ArrayList(u8).initCapacity(allocator, identifier.len + 2);
     defer buf.deinit();
@@ -114,7 +114,7 @@ pub fn quoteIdentifier(allocator: std.mem.Allocator, identifier: []const u8) ![]
     return try buf.toOwnedSlice();
 }
 
-/// caller owns memory
+/// Quotes literal, caller owns memory
 pub fn quoteLiteral(allocator: std.mem.Allocator, literal: []const u8) ![]const u8 {
     var buf = try std.ArrayList(u8).initCapacity(allocator, literal.len + 2);
     defer buf.deinit();

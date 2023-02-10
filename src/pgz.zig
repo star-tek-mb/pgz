@@ -3,13 +3,17 @@ const encdec = @import("encdec.zig");
 const messaging = @import("messaging.zig");
 const auth = @import("auth.zig");
 
-pub const quoteIdentifier = encdec.quoteIdentifier;
-pub const quoteLiteral = encdec.quoteLiteral;
 const ReadBuffer = messaging.ReadBuffer;
 const WriteBuffer = messaging.WriteBuffer;
 const Message = messaging.Message;
 
-const Error = struct {
+/// Quotes identifier, caller owns memory
+pub const quoteIdentifier = encdec.quoteIdentifier;
+/// Quotes literal, caller owns memory
+pub const quoteLiteral = encdec.quoteLiteral;
+
+/// Error returned from Postgres server
+pub const Error = struct {
     severity: [5]u8 = undefined,
     code: [5]u8 = undefined,
     message: [128]u8 = undefined,
@@ -40,12 +44,14 @@ const RowHeader = struct {
     binary: bool,
 };
 
+/// Query result that holds data, do not forget to `deinit`
 pub fn QueryResult(comptime T: type) type {
     return struct {
         allocator: std.mem.Allocator,
         data: []T,
         affectedRows: u32,
 
+        /// Deinitializes allocated data. You can omit `deinit` if your data doesn't contain strings
         pub fn deinit(self: *@This()) void {
             for (self.data) |row| {
                 inline for (@typeInfo(T).Struct.fields) |field| {
@@ -62,12 +68,15 @@ pub fn QueryResult(comptime T: type) type {
     };
 }
 
+/// Single blocking Postgres connection
 pub const Connection = struct {
     allocator: std.mem.Allocator,
     stream: std.net.Stream,
     statement_count: u32 = 0,
     @"error": ?Error = null,
 
+    /// Connect to Postgres server with DSN connection string
+    /// example: `postgres://testing:testing@localhost:5432/testing`
     pub fn init(allocator: std.mem.Allocator, dsn: std.Uri) !Connection {
         var connection = Connection{
             .allocator = allocator,
@@ -89,10 +98,13 @@ pub const Connection = struct {
         return connection;
     }
 
+    /// Assumes that error catched in one of the connection methods
+    /// exec, query, prepare, and corresponding statement methods
     pub fn getLastError(self: *Connection) Error {
         return self.@"error".?;
     }
 
+    /// Executes SQL query. You can execute multiple queries in a row
     pub fn exec(self: *Connection, sql: []const u8) !void {
         var wb = try WriteBuffer.init(self.allocator, 'Q');
         defer wb.deinit();
@@ -113,6 +125,7 @@ pub const Connection = struct {
         }
     }
 
+    /// Executes single SQL query, and scans data into type `T`
     /// caller owns memory, release memory with `result.deinit()` function
     pub fn query(self: *Connection, sql: []const u8, comptime T: type) !QueryResult(T) {
         var wb = try WriteBuffer.init(self.allocator, 'Q');
@@ -122,6 +135,8 @@ pub const Connection = struct {
         return self.fetchRows(T);
     }
 
+    /// Prepares statement to safely bind values to SQL query
+    /// caller owns memory, release memory with `statement.deinit()`
     pub fn prepare(self: *Connection, sql: []const u8) !Statement {
         var name_buffer: [10]u8 = undefined; // 4294967295 - max value - length 10
         var name = try std.fmt.bufPrint(&name_buffer, "{d}", .{self.statement_count});
@@ -154,6 +169,7 @@ pub const Connection = struct {
         return Statement{ .connection = self.*, .statement = self.statement_count - 1 };
     }
 
+    /// Closes and frees memory owned by Connection
     pub fn deinit(self: *Connection) void {
         self.notifyClose() catch {};
         self.stream.close();
@@ -352,10 +368,12 @@ pub const Connection = struct {
     }
 };
 
+/// Prepared statement binded to Connection
 pub const Statement = struct {
     connection: Connection,
     statement: u32,
 
+    /// deinitializes and frees allocated memory
     pub fn deinit(self: *Statement) void {
         var name_buffer: [10]u8 = undefined; // 4294967295 - max value - length 10
         var name = std.fmt.bufPrint(&name_buffer, "{d}", .{self.statement}) catch return;
@@ -367,6 +385,7 @@ pub const Statement = struct {
         buffer.send(self.connection.stream) catch return;
     }
 
+    /// Binds `args` to statement and executes query
     pub fn exec(self: *Statement, args: anytype) !void {
         try self.sendExec(args);
 
@@ -384,6 +403,8 @@ pub const Statement = struct {
         }
     }
 
+    /// Binds `args` to statement, executes single SQL query and scans data into type `T`
+    /// caller owns memory, release memory with `result.deinit()` function
     pub fn query(self: *Statement, comptime T: type, args: anytype) !QueryResult(T) {
         try self.sendExec(args);
         return try self.connection.fetchRows(T);
