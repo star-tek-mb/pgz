@@ -4,11 +4,10 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const module = b.addModule(.{
+    b.addModule(.{
         .name = "pgz",
         .source_file = .{ .path = "src/pgz.zig" },
     });
-    _ = module;
 
     const lib = b.addStaticLibrary(.{
         .name = "pgz",
