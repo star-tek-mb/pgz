@@ -25,7 +25,7 @@ jobs:
             zig version
       - name: Run tests
         run: zig build test
-      - name: rsync deployments
+      - name: Deploy docs
         uses: burnett01/rsync-deployments@5.2.1
         with:
           switches: -avzr --delete
