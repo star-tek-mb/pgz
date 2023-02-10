@@ -4,23 +4,26 @@
 const std = @import("std");
 const messaging = @import("messaging.zig");
 const WriteBuffer = messaging.WriteBuffer;
+const Md5 = std.crypto.hash.Md5;
+const Hmac = std.crypto.auth.hmac.sha2.HmacSha256;
+const Base64 = std.base64.standard;
 
 pub fn md5(user: []const u8, password: []const u8, salt: []const u8) [35]u8 {
     var digest: [16]u8 = undefined;
-    var hasher = std.crypto.hash.Md5.init(.{});
+    var hasher = Md5.init(.{});
     hasher.update(password);
     hasher.update(user);
     hasher.final(&digest);
-    hasher = std.crypto.hash.Md5.init(.{});
-    hasher.update(&hexDigest(16, digest));
+    hasher = Md5.init(.{});
+    hasher.update(&hexDigest(digest));
     hasher.update(salt);
     hasher.final(&digest);
-    return ("md5" ++ hexDigest(16, digest)).*;
+    return ("md5" ++ hexDigest(digest)).*;
 }
 
 const hex_charset = "0123456789abcdef";
-fn hexDigest(comptime size: comptime_int, digest: [size]u8) [size * 2]u8 {
-    var ret: [size * 2]u8 = undefined;
+fn hexDigest(digest: [16]u8) [32]u8 {
+    var ret: [32]u8 = undefined;
     for (digest) |byte, i| {
         ret[i * 2 + 0] = hex_charset[byte >> 4];
         ret[i * 2 + 1] = hex_charset[byte & 15];
@@ -29,6 +32,7 @@ fn hexDigest(comptime size: comptime_int, digest: [size]u8) [size * 2]u8 {
 }
 
 pub const Scram = struct {
+    buffer: [512]u8 = undefined,
     state: State,
 
     pub const State = union(enum) {
@@ -38,10 +42,8 @@ pub const Scram = struct {
         },
         finish: struct {
             salted_password: [32]u8,
-            auth_buffer: [256]u8,
-            auth_length: usize,
-            msg_buffer: [256]u8,
-            msg_length: usize,
+            auth: []const u8,
+            message: []const u8,
         },
         done: void,
 
@@ -55,7 +57,7 @@ pub const Scram = struct {
                     wb.writeBytes(&u.nonce);
                 },
                 .finish => |f| {
-                    wb.writeBytes(f.msg_buffer[0..f.msg_length]);
+                    wb.writeBytes(f.message);
                 },
                 .done => {},
             }
@@ -111,15 +113,15 @@ pub const Scram = struct {
         }
 
         var decoded_salt_buf: [32]u8 = undefined;
-        var decoded_salt_len = try std.base64.standard.Decoder.calcSizeForSlice(salt);
+        var decoded_salt_len = try Base64.Decoder.calcSizeForSlice(salt);
         if (decoded_salt_len > 32) return error.OutOfMemory;
-        try std.base64.standard.Decoder.decode(&decoded_salt_buf, salt);
+        try Base64.Decoder.decode(&decoded_salt_buf, salt);
         var decoded_salt = decoded_salt_buf[0..decoded_salt_len];
 
         var salted_password = hi(self.state.update.password, decoded_salt, try std.fmt.parseInt(usize, iterations, 10));
-        var hmac = std.crypto.auth.hmac.sha2.HmacSha256.init(&salted_password);
+        var hmac = Hmac.init(&salted_password);
         hmac.update("Client Key");
-        var client_key: [32]u8 = undefined;
+        var client_key: [Hmac.key_length]u8 = undefined;
         hmac.final(&client_key);
 
         var sha256 = std.crypto.hash.sha2.Sha256.init(.{});
@@ -131,25 +133,32 @@ pub const Scram = struct {
 
         var finish_state = Scram.State{ .finish = undefined };
 
-        var auth_message = try std.fmt.bufPrint(&finish_state.finish.auth_buffer, "n=,r={s},{s},c={s},r={s}", .{ self.state.update.nonce, message, cbind, nonce });
-        finish_state.finish.auth_length = auth_message.len;
+        finish_state.finish.auth = try std.fmt.bufPrint(self.buffer[0..256], "n=,r={s},{s},c={s},r={s}", .{
+            self.state.update.nonce,
+            message,
+            cbind,
+            nonce,
+        });
 
-        var client_hmac = std.crypto.auth.hmac.sha2.HmacSha256.init(&stored_key);
-        client_hmac.update(auth_message);
-        var client_signature: [32]u8 = undefined;
+        var client_hmac = Hmac.init(&stored_key);
+        client_hmac.update(finish_state.finish.auth);
+        var client_signature: [Hmac.key_length]u8 = undefined;
         client_hmac.final(&client_signature);
 
         var client_proof = client_key;
         var i: usize = 0;
-        while (i < 32) : (i += 1) {
+        while (i < Hmac.key_length) : (i += 1) {
             client_proof[i] ^= client_signature[i];
         }
 
-        var encoded_proof: [std.base64.standard.Encoder.calcSize(32)]u8 = undefined;
-        _ = std.base64.standard.Encoder.encode(&encoded_proof, &client_proof);
+        var encoded_proof: [Base64.Encoder.calcSize(Hmac.key_length)]u8 = undefined;
+        _ = Base64.Encoder.encode(&encoded_proof, &client_proof);
 
-        var finish_message = try std.fmt.bufPrint(&finish_state.finish.msg_buffer, "c={s},r={s},p={s}", .{ cbind, nonce, &encoded_proof });
-        finish_state.finish.msg_length = finish_message.len;
+        finish_state.finish.message = try std.fmt.bufPrint(self.buffer[256..512], "c={s},r={s},p={s}", .{
+            cbind,
+            nonce,
+            &encoded_proof,
+        });
 
         finish_state.finish.salted_password = salted_password;
         self.state = finish_state;
@@ -161,19 +170,19 @@ pub const Scram = struct {
 
         var verifier = message[2..];
         var verifier_buf: [128]u8 = undefined;
-        var verifier_len = try std.base64.standard.Decoder.calcSizeForSlice(verifier);
+        var verifier_len = try Base64.Decoder.calcSizeForSlice(verifier);
         if (verifier_len > 128) return error.OutOfMemory;
-        try std.base64.standard.Decoder.decode(&verifier_buf, verifier);
+        try Base64.Decoder.decode(&verifier_buf, verifier);
         var decoded_verified = verifier_buf[0..verifier_len];
 
-        var hmac = std.crypto.auth.hmac.sha2.HmacSha256.init(&self.state.finish.salted_password);
+        var hmac = Hmac.init(&self.state.finish.salted_password);
         hmac.update("Server Key");
         var server_key: [32]u8 = undefined;
         hmac.final(&server_key);
 
-        hmac = std.crypto.auth.hmac.sha2.HmacSha256.init(&server_key);
-        hmac.update(self.state.finish.auth_buffer[0..self.state.finish.auth_length]);
-        var hashed_verified: [32]u8 = undefined;
+        hmac = Hmac.init(&server_key);
+        hmac.update(self.state.finish.auth);
+        var hashed_verified: [Hmac.key_length]u8 = undefined;
         hmac.final(&hashed_verified);
 
         if (!std.mem.eql(u8, decoded_verified, &hashed_verified)) return error.VerifyError;
@@ -183,24 +192,24 @@ pub const Scram = struct {
 };
 
 fn hi(string: []const u8, salt: []const u8, iterations: usize) [32]u8 {
-    var result: [32]u8 = undefined;
+    var result: [Hmac.key_length]u8 = undefined;
 
-    var hmac = std.crypto.auth.hmac.sha2.HmacSha256.init(string);
+    var hmac = Hmac.init(string);
     hmac.update(salt);
     hmac.update(&.{ 0, 0, 0, 1 });
-    var previous: [32]u8 = undefined;
+    var previous: [Hmac.key_length]u8 = undefined;
     hmac.final(&previous);
 
     result = previous;
 
     var i: usize = 1;
     while (i < iterations) : (i += 1) {
-        var hmac_iter = std.crypto.auth.hmac.sha2.HmacSha256.init(string);
+        var hmac_iter = Hmac.init(string);
         hmac_iter.update(&previous);
         hmac_iter.final(&previous);
 
         var j: usize = 0;
-        while (j < 32) : (j += 1) {
+        while (j < Hmac.key_length) : (j += 1) {
             result[j] ^= previous[j];
         }
     }
