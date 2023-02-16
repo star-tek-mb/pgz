@@ -287,9 +287,7 @@ pub const Connection = struct {
                 'D' => {
                     var buffer = ReadBuffer.init(msg.msg);
                     var num_rows = buffer.readInt(u16);
-                    if (num_rows > @typeInfo(T).Struct.fields.len) return error.ScanMismatch;
 
-                    var scanned: usize = 0;
                     var row: T = undefined;
                     var i: usize = 0;
 
@@ -306,20 +304,17 @@ pub const Connection = struct {
                             inline for (@typeInfo(T).Struct.fields) |field, j| {
                                 if (i == j) {
                                     @field(row, field.name) = try encdec.decode(self.allocator, value, field.type);
-                                    scanned += 1;
                                 }
                             }
                         } else {
                             inline for (@typeInfo(T).Struct.fields) |field, j| {
                                 if (i == j and std.mem.eql(u8, row_headers.items[i].name, field.name)) {
                                     @field(row, field.name) = try encdec.decode(self.allocator, value, field.type);
-                                    scanned += 1;
                                 }
                             }
                         }
                     }
 
-                    if (scanned != @typeInfo(T).Struct.fields.len) return error.ScanMismatch;
                     try result.append(self.allocator, row);
                 },
                 else => {},
@@ -454,8 +449,13 @@ fn parseAffectedRows(command: []const u8) u32 {
 }
 
 test "connect" {
-    var conn = try Connection.init(std.testing.allocator, try std.Uri.parse("postgres://testing:testing@localhost:5432/testing"));
+    var conn = try Connection.init(std.testing.allocator, try std.Uri.parse("postgres://testing:testing@localhost:5432/testing?sslmode=disable"));
     defer conn.deinit();
+}
+
+test "wrong auth" {
+    var res = Connection.init(std.testing.allocator, try std.Uri.parse("postgres://testing:wrong@localhost:5432/testing"));
+    try std.testing.expectError(error.AuthenticationError, res);
 }
 
 test "exec" {
