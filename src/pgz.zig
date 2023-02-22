@@ -73,7 +73,7 @@ pub const Connection = struct {
     allocator: std.mem.Allocator,
     stream: std.net.Stream,
     statement_count: u32 = 0,
-    @"error": ?Error = null,
+    last_error: ?Error = null,
 
     /// Connect to Postgres server with DSN connection string
     /// example: `postgres://testing:testing@localhost:5432/testing`
@@ -101,7 +101,7 @@ pub const Connection = struct {
     /// Assumes that error catched in one of the connection methods
     /// exec, query, prepare, and corresponding statement methods
     pub fn getLastError(self: *Connection) Error {
-        return self.@"error".?;
+        return self.last_error.?;
     }
 
     /// Executes SQL query. You can execute multiple queries in a row
@@ -268,8 +268,7 @@ pub const Connection = struct {
                     var buffer = ReadBuffer.init(msg.msg);
                     var num_rows = buffer.readInt(u16);
                     try row_headers.ensureTotalCapacity(self.allocator, num_rows);
-                    var i: usize = 0;
-                    while (i < num_rows) : (i += 1) {
+                    for (0..num_rows) |_| {
                         var name = try self.allocator.dupe(u8, buffer.readString());
                         _ = buffer.readInt(u32);
                         _ = buffer.readInt(u16);
@@ -287,11 +286,9 @@ pub const Connection = struct {
                 'D' => {
                     var buffer = ReadBuffer.init(msg.msg);
                     var num_rows = buffer.readInt(u16);
-
                     var row: T = undefined;
-                    var i: usize = 0;
 
-                    while (i < num_rows) : (i += 1) {
+                    for (0..num_rows) |i| {
                         var len = buffer.readInt(u32);
                         var value: ?[]const u8 = undefined;
                         if (len == @truncate(u32, -1)) {
@@ -301,13 +298,13 @@ pub const Connection = struct {
                         }
 
                         if (@typeInfo(T).Struct.is_tuple) {
-                            inline for (@typeInfo(T).Struct.fields) |field, j| {
+                            inline for (@typeInfo(T).Struct.fields, 0..) |field, j| {
                                 if (i == j) {
                                     @field(row, field.name) = try encdec.decode(self.allocator, value, field.type);
                                 }
                             }
                         } else {
-                            inline for (@typeInfo(T).Struct.fields) |field, j| {
+                            inline for (@typeInfo(T).Struct.fields, 0..) |field, j| {
                                 if (i == j and std.mem.eql(u8, row_headers.items[i].name, field.name)) {
                                     @field(row, field.name) = try encdec.decode(self.allocator, value, field.type);
                                 }
@@ -328,25 +325,25 @@ pub const Connection = struct {
     }
 
     fn parseError(self: *Connection, msg: Message) void {
-        self.@"error" = Error{};
+        self.last_error = Error{};
 
         var rb = ReadBuffer.init(msg.msg);
         var code = rb.readInt(u8);
         while (code != 0) : (code = rb.readInt(u8)) {
             switch (code) {
                 'S', 'V' => {
-                    std.mem.copy(u8, self.@"error".?.severity[0..], rb.readString());
+                    std.mem.copy(u8, self.last_error.?.severity[0..], rb.readString());
                 },
                 'C' => {
-                    std.mem.copy(u8, self.@"error".?.code[0..], rb.readString());
+                    std.mem.copy(u8, self.last_error.?.code[0..], rb.readString());
                 },
                 'M' => {
                     var message = rb.readString();
                     if (message.len > 256) {
-                        self.@"error".?.length = 0;
+                        self.last_error.?.length = 0;
                     } else {
-                        self.@"error".?.length = @intCast(u32, message.len);
-                        std.mem.copy(u8, self.@"error".?.message[0..], message);
+                        self.last_error.?.length = @intCast(u32, message.len);
+                        std.mem.copy(u8, self.last_error.?.message[0..], message);
                     }
                 },
                 else => {

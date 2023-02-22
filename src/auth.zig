@@ -24,7 +24,7 @@ pub fn md5(user: []const u8, password: []const u8, salt: []const u8) [35]u8 {
 const hex_charset = "0123456789abcdef";
 fn hexDigest(digest: [16]u8) [32]u8 {
     var ret: [32]u8 = undefined;
-    for (digest) |byte, i| {
+    for (digest, 0..) |byte, i| {
         ret[i * 2 + 0] = hex_charset[byte >> 4];
         ret[i * 2 + 1] = hex_charset[byte & 15];
     }
@@ -67,7 +67,7 @@ pub const Scram = struct {
     pub fn init(password: []const u8) Scram {
         var nonce: [24]u8 = undefined;
         var randomizer = std.rand.Xoshiro256.init(@intCast(u64, std.time.milliTimestamp()));
-        for (nonce) |*b| {
+        for (&nonce) |*b| {
             var byte = randomizer.random().intRangeAtMost(u8, 0x21, 0x7e);
             if (byte == 0x2c) {
                 byte = 0x7e;
@@ -202,14 +202,12 @@ fn hi(string: []const u8, salt: []const u8, iterations: usize) [32]u8 {
 
     result = previous;
 
-    var i: usize = 1;
-    while (i < iterations) : (i += 1) {
+    for (1..iterations) |_| {
         var hmac_iter = Hmac.init(string);
         hmac_iter.update(&previous);
         hmac_iter.final(&previous);
 
-        var j: usize = 0;
-        while (j < Hmac.key_length) : (j += 1) {
+        for (0..Hmac.key_length) |j| {
             result[j] ^= previous[j];
         }
     }

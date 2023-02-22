@@ -7,7 +7,7 @@ fn hexEncode(allocator: std.mem.Allocator, string: []const u8) []const u8 {
     var ret = allocator.alloc(u8, 2 + string.len * 2);
     ret[0] = '\\';
     ret[1] = 'x';
-    for (string) |byte, i| {
+    for (string, 0..) |byte, i| {
         ret[(i + 1) * 2 + 0] = hex_charset[byte >> 4];
         ret[(i + 1) * 2 + 1] = hex_charset[byte & 15];
     }
@@ -103,8 +103,7 @@ pub fn quoteIdentifier(allocator: std.mem.Allocator, identifier: []const u8) ![]
     var buf = try std.ArrayList(u8).initCapacity(allocator, identifier.len + 2);
     defer buf.deinit();
     try buf.append('\"');
-    var i: usize = 0;
-    while (i < identifier.len) : (i += 1) {
+    for (0..identifier.len) |i| {
         if (identifier[i] == '\"') {
             try buf.append(identifier[i]);
         }
