@@ -2,6 +2,7 @@ const std = @import("std");
 const encdec = @import("encdec.zig");
 const messaging = @import("messaging.zig");
 const auth = @import("auth.zig");
+const tls = @import("tls.zig");
 
 const ReadBuffer = messaging.ReadBuffer;
 const WriteBuffer = messaging.WriteBuffer;
@@ -72,8 +73,26 @@ pub fn QueryResult(comptime T: type) type {
 pub const Connection = struct {
     allocator: std.mem.Allocator,
     stream: std.net.Stream,
+    tls_stream: *tls.Stream = undefined,
+    secure: bool = false,
     statement_count: u32 = 0,
     last_error: ?Error = null,
+
+    fn readMessage(self: *Connection) !Message {
+        if (self.secure) {
+            return Message.read(self.allocator, self.tls_stream.reader());
+        } else {
+            return Message.read(self.allocator, self.stream.reader());
+        }
+    }
+
+    fn sendBuffer(self: *Connection, wb: WriteBuffer) !void {
+        if (self.secure) {
+            return wb.send(self.tls_stream.writer());
+        } else {
+            return wb.send(self.stream.writer());
+        }
+    }
 
     /// Connect to Postgres server with DSN connection string
     /// example: `postgres://testing:testing@localhost:5432/testing`
@@ -83,9 +102,10 @@ pub const Connection = struct {
             .stream = undefined,
         };
         connection.stream = try std.net.tcpConnectToHost(allocator, dsn.host orelse "localhost", dsn.port orelse 5432);
+        errdefer connection.deinit();
         try connection.startup(dsn.user orelse "postgres", dsn.path[1..]);
         while (true) {
-            var msg = try Message.read(allocator, connection.stream.reader());
+            var msg = try connection.readMessage();
             defer msg.free(allocator);
             switch (msg.type) {
                 'R' => try connection.handleAuth(msg, dsn.user orelse "postgres", dsn.password orelse ""),
@@ -109,10 +129,10 @@ pub const Connection = struct {
         var wb = try WriteBuffer.init(self.allocator, 'Q');
         defer wb.deinit();
         wb.writeString(sql);
-        try wb.send(self.stream);
+        try self.sendBuffer(wb);
 
         while (true) {
-            var msg = try Message.read(self.allocator, self.stream.reader());
+            var msg = try self.readMessage();
             defer msg.free(self.allocator);
             switch (msg.type) {
                 'E' => {
@@ -131,7 +151,7 @@ pub const Connection = struct {
         var wb = try WriteBuffer.init(self.allocator, 'Q');
         defer wb.deinit();
         wb.writeString(sql);
-        try wb.send(self.stream);
+        try self.sendBuffer(wb);
         return self.fetchRows(T);
     }
 
@@ -151,10 +171,10 @@ pub const Connection = struct {
         wb.writeInt(u8, 'S');
         wb.writeString(name);
         wb.next('S');
-        try wb.send(self.stream);
+        try self.sendBuffer(wb);
 
         while (true) {
-            var msg = try Message.read(self.allocator, self.stream.reader());
+            var msg = try self.readMessage();
             defer msg.free(self.allocator);
             switch (msg.type) {
                 'E' => {
@@ -172,19 +192,32 @@ pub const Connection = struct {
     /// Closes and frees memory owned by Connection
     pub fn deinit(self: *Connection) void {
         self.notifyClose() catch {};
+        if (self.secure) {
+            self.tls_stream.deinit();
+        }
         self.stream.close();
     }
 
     fn startup(self: *Connection, user: []const u8, database: []const u8) !void {
         var wb = try WriteBuffer.init(self.allocator, null);
         defer wb.deinit();
+        wb.writeInt(u32, 80877103);
+        try self.sendBuffer(wb);
+        const ssl = try self.stream.reader().readByte();
+        self.secure = if (ssl == 'S') true else false;
+        if (self.secure) {
+            self.tls_stream = try tls.Stream.init(self.allocator);
+            try self.tls_stream.wrap(self.stream);
+            try self.tls_stream.handshake();
+        }
+        wb.reset(null);
         wb.writeInt(u32, 196608);
         wb.writeString("user");
         wb.writeString(user);
         wb.writeString("database");
         wb.writeString(database);
         wb.writeInt(u8, 0);
-        try wb.send(self.stream);
+        try self.sendBuffer(wb);
     }
 
     fn handleAuth(self: *Connection, msg: Message, user: []const u8, password: []const u8) !void {
@@ -201,9 +234,9 @@ pub const Connection = struct {
                 var wb = try WriteBuffer.init(self.allocator, 'p');
                 defer wb.deinit();
                 wb.writeString(&md5);
-                try wb.send(self.stream);
+                try self.sendBuffer(wb);
 
-                var check_msg = try Message.read(self.allocator, self.stream.reader());
+                var check_msg = try self.readMessage();
                 defer check_msg.free(self.allocator);
                 var check_buffer = ReadBuffer.init(check_msg.msg);
                 var status = check_buffer.readInt(u32);
@@ -215,18 +248,18 @@ pub const Connection = struct {
                 var wb = try WriteBuffer.init(self.allocator, 'p');
                 defer wb.deinit();
                 scram.state.writeTo(&wb);
-                try wb.send(self.stream);
+                try self.sendBuffer(wb);
 
-                var server_first = try Message.read(self.allocator, self.stream.reader());
+                var server_first = try self.readMessage();
                 defer server_first.free(self.allocator);
                 if (server_first.type != 'R') return error.AuthenticationError;
                 scram.update(server_first.msg[4..]) catch return error.AuthenticationError;
 
                 wb.reset('p');
                 scram.state.writeTo(&wb);
-                try wb.send(self.stream);
+                try self.sendBuffer(wb);
 
-                var server_final = try Message.read(self.allocator, self.stream.reader());
+                var server_final = try self.readMessage();
                 defer server_final.free(self.allocator);
                 if (server_final.type != 'R') return error.AuthenticationError;
                 scram.finish(server_final.msg[4..]) catch return error.AuthenticationError;
@@ -250,7 +283,7 @@ pub const Connection = struct {
         defer result.deinit(self.allocator);
 
         while (true) {
-            var msg = try Message.read(self.allocator, self.stream.reader());
+            var msg = try self.readMessage();
             defer msg.free(self.allocator);
             switch (msg.type) {
                 'C' => {
@@ -356,7 +389,7 @@ pub const Connection = struct {
     fn notifyClose(self: *Connection) !void {
         var wb = try WriteBuffer.init(self.allocator, 'X');
         defer wb.deinit();
-        try wb.send(self.stream);
+        try self.sendBuffer(wb);
     }
 };
 
@@ -369,12 +402,12 @@ pub const Statement = struct {
     pub fn deinit(self: *Statement) void {
         var name_buffer: [10]u8 = undefined; // 4294967295 - max value - length 10
         var name = std.fmt.bufPrint(&name_buffer, "{d}", .{self.statement}) catch return;
-        var buffer = WriteBuffer.init(self.connection.allocator, 'C') catch return;
-        defer buffer.deinit();
-        buffer.writeInt(u8, 'C');
-        buffer.writeString(name);
-        buffer.next('S');
-        buffer.send(self.connection.stream) catch return;
+        var wb = WriteBuffer.init(self.connection.allocator, 'C') catch return;
+        defer wb.deinit();
+        wb.writeInt(u8, 'C');
+        wb.writeString(name);
+        wb.next('S');
+        self.connection.sendBuffer(wb) catch return;
     }
 
     /// Binds `args` to statement and executes query
@@ -382,7 +415,7 @@ pub const Statement = struct {
         try self.sendExec(args);
 
         while (true) {
-            var msg = try Message.read(self.connection.allocator, self.connection.stream.reader());
+            var msg = try self.connection.readMessage();
             defer msg.free(self.connection.allocator);
             switch (msg.type) {
                 'E' => {
@@ -427,7 +460,7 @@ pub const Statement = struct {
         wb.writeInt(u8, 0);
         wb.writeInt(u32, 0);
         wb.next('S');
-        try wb.send(self.connection.stream);
+        try self.connection.sendBuffer(wb);
     }
 };
 
@@ -446,7 +479,7 @@ fn parseAffectedRows(command: []const u8) u32 {
 }
 
 test "connect" {
-    var conn = try Connection.init(std.testing.allocator, try std.Uri.parse("postgres://testing:testing@localhost:5432/testing?sslmode=disable"));
+    var conn = try Connection.init(std.testing.allocator, try std.Uri.parse("postgres://testing:testing@localhost:5432/testing"));
     defer conn.deinit();
 }
 

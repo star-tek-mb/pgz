@@ -4,6 +4,11 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    const mbedtls_dep = b.dependency("mbedtls", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     b.addModule(.{
         .name = "pgz",
         .source_file = .{ .path = "src/pgz.zig" },
@@ -22,6 +27,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    main_tests.linkLibrary(mbedtls_dep.artifact("mbedtls"));
     main_tests.emit_docs = .emit;
 
     const test_step = b.step("test", "Run library tests");

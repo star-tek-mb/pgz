@@ -63,7 +63,7 @@ pub const WriteBuffer = struct {
         self.buf.writer().writeAll(bytes) catch {};
     }
 
-    pub fn finalize(self: *WriteBuffer) void {
+    pub fn finalize(self: *const WriteBuffer) void {
         if (self.tag == null) {
             std.mem.writeIntBig(u32, self.buf.items[self.index..][0..4], @intCast(u32, self.buf.items.len - self.index));
         } else {
@@ -92,7 +92,7 @@ pub const WriteBuffer = struct {
     }
 
     /// finalizes buffer before sending
-    pub fn send(self: *WriteBuffer, stream: std.net.Stream) !void {
+    pub fn send(self: *const WriteBuffer, stream: anytype) !void {
         self.finalize();
         try stream.writeAll(self.buf.items);
     }
