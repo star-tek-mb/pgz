@@ -1,7 +1,7 @@
 # Overview
 
 ![](https://img.shields.io/github/actions/workflow/status/star-tek-mb/pgz/ci.yml)
-![](https://img.shields.io/badge/version-0.0.2-red)
+![](https://img.shields.io/badge/version-0.0.1-red)
 ![](https://img.shields.io/github/license/star-tek-mb/pgz)
 ![https://pgz.decoy.uz](https://img.shields.io/badge/docs-passing-green)
 
