@@ -24,13 +24,4 @@ jobs:
             sudo snap install zig --classic --edge
             zig version
       - name: Run tests
-        run: zig build test
-      - name: Deploy docs
-        uses: burnett01/rsync-deployments@5.2.1
-        with:
-          switches: -avzr --delete
-          path: docs/
-          remote_path: /home/ubuntu/sites/pgz/
-          remote_host: decoy.uz
-          remote_user: ubuntu
-          remote_key: ${{ secrets.DEPLOY_KEY }}
+        run: zig test src/pgz.zig
