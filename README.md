@@ -31,8 +31,6 @@ pub fn main() !void {
 }
 ```
 
-Read [Autodoc](https://pgz.decoy.uz) page.
-
 # TODOs
 
 - Optimize allocations (use stack fallback allocator for messages)
