@@ -65,9 +65,9 @@ pub const WriteBuffer = struct {
 
     pub fn finalize(self: *WriteBuffer) void {
         if (self.tag == null) {
-            std.mem.writeIntBig(u32, self.buf.items[self.index..][0..4], @intCast(u32, self.buf.items.len - self.index));
+            std.mem.writeIntBig(u32, self.buf.items[self.index..][0..4], @as(u32, @intCast(self.buf.items.len - self.index)));
         } else {
-            std.mem.writeIntBig(u32, self.buf.items[self.index + 1 ..][0..4], @intCast(u32, self.buf.items.len - self.index - 1));
+            std.mem.writeIntBig(u32, self.buf.items[self.index + 1 ..][0..4], @as(u32, @intCast(self.buf.items.len - self.index - 1)));
         }
     }
 
@@ -83,7 +83,7 @@ pub const WriteBuffer = struct {
 
     pub fn next(self: *WriteBuffer, maybe_tag: ?u8) void {
         self.finalize();
-        self.index = @intCast(u32, self.buf.items.len);
+        self.index = @as(u32, @intCast(self.buf.items.len));
         self.tag = maybe_tag;
         if (maybe_tag) |tag| {
             self.buf.append(tag) catch {};

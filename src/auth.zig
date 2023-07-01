@@ -52,7 +52,7 @@ pub const Scram = struct {
                 .update => |u| {
                     var len = "n,,n=,r=".len + u.nonce.len;
                     wb.writeString("SCRAM-SHA-256");
-                    wb.writeInt(u32, @intCast(u32, len));
+                    wb.writeInt(u32, @as(u32, @intCast(len)));
                     wb.writeBytes("n,,n=,r=");
                     wb.writeBytes(&u.nonce);
                 },
@@ -66,7 +66,7 @@ pub const Scram = struct {
 
     pub fn init(password: []const u8) Scram {
         var nonce: [24]u8 = undefined;
-        var randomizer = std.rand.Xoshiro256.init(@intCast(u64, std.time.milliTimestamp()));
+        var randomizer = std.rand.Xoshiro256.init(@as(u64, @intCast(std.time.milliTimestamp())));
         for (&nonce) |*b| {
             var byte = randomizer.random().intRangeAtMost(u8, 0x21, 0x7e);
             if (byte == 0x2c) {

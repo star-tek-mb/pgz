@@ -291,7 +291,7 @@ pub const Connection = struct {
                     for (0..num_rows) |i| {
                         var len = buffer.readInt(u32);
                         var value: ?[]const u8 = undefined;
-                        if (len == @truncate(u32, -1)) {
+                        if (len == @as(u32, @truncate(-1))) {
                             value = null;
                         } else {
                             value = buffer.readBytes(len);
@@ -342,7 +342,7 @@ pub const Connection = struct {
                     if (message.len > 256) {
                         self.last_error.?.length = 0;
                     } else {
-                        self.last_error.?.length = @intCast(u32, message.len);
+                        self.last_error.?.length = @as(u32, @intCast(message.len));
                         std.mem.copy(u8, self.last_error.?.message[0..], message);
                     }
                 },
@@ -414,11 +414,11 @@ pub const Statement = struct {
         wb.writeInt(u16, args.len);
         inline for (@typeInfo(@TypeOf(args)).Struct.fields) |field| {
             if ((@typeInfo(field.type) == .Optional or @typeInfo(field.type) == .Null) and @field(args, field.name) == null) {
-                wb.writeInt(u32, @truncate(u32, -1));
+                wb.writeInt(u32, @as(u32, @truncate(-1)));
             } else {
                 var encoded = try encdec.encode(self.connection.allocator, @field(args, field.name));
                 defer self.connection.allocator.free(encoded);
-                wb.writeInt(u32, @intCast(u32, encoded.len));
+                wb.writeInt(u32, @as(u32, @intCast(encoded.len)));
                 wb.writeBytes(encoded);
             }
         }
