@@ -7,11 +7,30 @@
 
 **pgz** - postgres driver/connector written in Zig (status pre-alpha development)
 
+# Package manager ready
+
+Add following lines to your `build.zig.zon` dependencies:
+```zig
+.pgz = .{
+    .url = "git+https://github.com/star-tek-mb/pgz#master",
+}
+```
+
+Run `zig build` then obtain hash of the package and insert it to `build.zig.zon`.
+
+Then you can use it as a library. Add following lines to `build.zig`:
+
+```zig
+const pgz_dep = b.dependency("pgz", .{ .target = target, .optimize = optimize });
+
+exe.addModule("pgz", pgz_dep.module("pgz"));
+```
+
 # Example
 
 ```zig
 const std = @import("std");
-const Connection = @import("pgz.zig").Connection;
+const Connection = @import("pgz").Connection;
 
 pub fn main() !void {
     var dsn = try std.Uri.parse("postgres://testing:testing@localhost:5432/testing");
