@@ -50,7 +50,7 @@ pub const Scram = struct {
         pub fn writeTo(self: *State, wb: *WriteBuffer) void {
             switch (self.*) {
                 .update => |u| {
-                    var len = "n,,n=,r=".len + u.nonce.len;
+                    const len = "n,,n=,r=".len + u.nonce.len;
                     wb.writeString("SCRAM-SHA-256");
                     wb.writeInt(u32, @as(u32, @intCast(len)));
                     wb.writeBytes("n,,n=,r=");
@@ -113,10 +113,10 @@ pub const Scram = struct {
         }
 
         var decoded_salt_buf: [32]u8 = undefined;
-        var decoded_salt_len = try Base64.Decoder.calcSizeForSlice(salt);
+        const decoded_salt_len = try Base64.Decoder.calcSizeForSlice(salt);
         if (decoded_salt_len > 32) return error.OutOfMemory;
         try Base64.Decoder.decode(&decoded_salt_buf, salt);
-        var decoded_salt = decoded_salt_buf[0..decoded_salt_len];
+        const decoded_salt = decoded_salt_buf[0..decoded_salt_len];
 
         var salted_password = hi(self.state.update.password, decoded_salt, try std.fmt.parseInt(usize, iterations, 10));
         var hmac = Hmac.init(&salted_password);
@@ -168,12 +168,12 @@ pub const Scram = struct {
         if (std.meta.activeTag(self.state) != .finish) return error.InvalidState;
         if (message[0] != 'v' and message.len <= 2) return error.InvalidInput;
 
-        var verifier = message[2..];
+        const verifier = message[2..];
         var verifier_buf: [128]u8 = undefined;
-        var verifier_len = try Base64.Decoder.calcSizeForSlice(verifier);
+        const verifier_len = try Base64.Decoder.calcSizeForSlice(verifier);
         if (verifier_len > 128) return error.OutOfMemory;
         try Base64.Decoder.decode(&verifier_buf, verifier);
-        var decoded_verified = verifier_buf[0..verifier_len];
+        const decoded_verified = verifier_buf[0..verifier_len];
 
         var hmac = Hmac.init(&self.state.finish.salted_password);
         hmac.update("Server Key");
@@ -227,7 +227,7 @@ test "scram-sha-256" {
     defer wb.deinit();
 
     var scram = Scram.init(password);
-    std.mem.copy(u8, scram.state.update.nonce[0..], nonce[0..]);
+    @memcpy(scram.state.update.nonce[0..nonce.len], nonce);
     scram.state.writeTo(&wb);
     try std.testing.expectEqualStrings(client_first, wb.buf.items[23..]);
 

@@ -140,17 +140,17 @@ pub fn quoteLiteral(allocator: std.mem.Allocator, literal: []const u8) ![]const 
 }
 
 test "quote identifier" {
-    var id = try quoteIdentifier(std.testing.allocator, "my_table");
+    const id = try quoteIdentifier(std.testing.allocator, "my_table");
     defer std.testing.allocator.free(id);
     try std.testing.expectEqualStrings("\"my_table\"", id);
 }
 
 test "quote literal" {
-    var q1 = try quoteLiteral(std.testing.allocator, "hello '' world");
+    const q1 = try quoteLiteral(std.testing.allocator, "hello '' world");
     defer std.testing.allocator.free(q1);
     try std.testing.expectEqualStrings("'hello '''' world'", q1);
 
-    var q2 = try quoteLiteral(std.testing.allocator, "hello \\'\\' world");
+    const q2 = try quoteLiteral(std.testing.allocator, "hello \\'\\' world");
     defer std.testing.allocator.free(q2);
     try std.testing.expectEqualStrings(" E'hello \\\\''\\\\'' world'", q2);
 }
