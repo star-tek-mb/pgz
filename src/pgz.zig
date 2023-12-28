@@ -139,7 +139,7 @@ pub const Connection = struct {
     /// caller owns memory, release memory with `statement.deinit()`
     pub fn prepare(self: *Connection, sql: []const u8) !Statement {
         var name_buffer: [10]u8 = undefined; // 4294967295 - max value - length 10
-        var name = try std.fmt.bufPrint(&name_buffer, "{d}", .{self.statement_count});
+        const name = try std.fmt.bufPrint(&name_buffer, "{d}", .{self.statement_count});
         self.statement_count += 1;
 
         var wb = try WriteBuffer.init(self.allocator, 'P');
@@ -191,11 +191,11 @@ pub const Connection = struct {
         if (msg.type != 'R') return error.UnexpectedMessage;
 
         var buffer = ReadBuffer.init(msg.msg);
-        var password_type = buffer.readInt(u32);
+        const password_type = buffer.readInt(u32);
         switch (password_type) {
             0 => {},
             5 => {
-                var salt = buffer.readBytes(4);
+                const salt = buffer.readBytes(4);
 
                 var md5 = auth.md5(user, password, salt);
                 var wb = try WriteBuffer.init(self.allocator, 'p');
@@ -206,7 +206,7 @@ pub const Connection = struct {
                 var check_msg = try Message.read(self.allocator, self.stream.reader());
                 defer check_msg.free(self.allocator);
                 var check_buffer = ReadBuffer.init(check_msg.msg);
-                var status = check_buffer.readInt(u32);
+                const status = check_buffer.readInt(u32);
                 if (status != 0) return error.AuthenticationError;
             },
             10 => {
@@ -266,16 +266,16 @@ pub const Connection = struct {
                 'Z' => break,
                 'T' => {
                     var buffer = ReadBuffer.init(msg.msg);
-                    var num_rows = buffer.readInt(u16);
+                    const num_rows = buffer.readInt(u16);
                     try row_headers.ensureTotalCapacity(self.allocator, num_rows);
                     for (0..num_rows) |_| {
-                        var name = try self.allocator.dupe(u8, buffer.readString());
+                        const name = try self.allocator.dupe(u8, buffer.readString());
                         _ = buffer.readInt(u32);
                         _ = buffer.readInt(u16);
-                        var data_type = buffer.readInt(u32);
+                        const data_type = buffer.readInt(u32);
                         _ = buffer.readInt(u16);
                         _ = buffer.readInt(u32);
-                        var text_or_binary = buffer.readInt(u16);
+                        const text_or_binary = buffer.readInt(u16);
                         try row_headers.append(self.allocator, RowHeader{
                             .name = name,
                             .type = data_type,
@@ -285,11 +285,11 @@ pub const Connection = struct {
                 },
                 'D' => {
                     var buffer = ReadBuffer.init(msg.msg);
-                    var num_rows = buffer.readInt(u16);
+                    const num_rows = buffer.readInt(u16);
                     var row: T = undefined;
 
                     for (0..num_rows) |i| {
-                        var len = buffer.readInt(u32);
+                        const len = buffer.readInt(u32);
                         var value: ?[]const u8 = undefined;
                         if (len == @as(u32, @truncate(-1))) {
                             value = null;
@@ -332,18 +332,20 @@ pub const Connection = struct {
         while (code != 0) : (code = rb.readInt(u8)) {
             switch (code) {
                 'S', 'V' => {
-                    std.mem.copy(u8, self.last_error.?.severity[0..], rb.readString());
+                    const s = rb.readString();
+                    @memcpy(self.last_error.?.severity[0..s.len], s);
                 },
                 'C' => {
-                    std.mem.copy(u8, self.last_error.?.code[0..], rb.readString());
+                    const s = rb.readString();
+                    @memcpy(self.last_error.?.code[0..s.len], s);
                 },
                 'M' => {
-                    var message = rb.readString();
+                    const message = rb.readString();
                     if (message.len > 256) {
                         self.last_error.?.length = 0;
                     } else {
                         self.last_error.?.length = @as(u32, @intCast(message.len));
-                        std.mem.copy(u8, self.last_error.?.message[0..], message);
+                        @memcpy(self.last_error.?.message[0..message.len], message);
                     }
                 },
                 else => {
@@ -368,7 +370,7 @@ pub const Statement = struct {
     /// deinitializes and frees allocated memory
     pub fn deinit(self: *Statement) void {
         var name_buffer: [10]u8 = undefined; // 4294967295 - max value - length 10
-        var name = std.fmt.bufPrint(&name_buffer, "{d}", .{self.statement}) catch return;
+        const name = std.fmt.bufPrint(&name_buffer, "{d}", .{self.statement}) catch return;
         var buffer = WriteBuffer.init(self.connection.allocator, 'C') catch return;
         defer buffer.deinit();
         buffer.writeInt(u8, 'C');
@@ -404,7 +406,7 @@ pub const Statement = struct {
 
     fn sendExec(self: *Statement, args: anytype) !void {
         var name_buffer: [10]u8 = undefined; // 4294967295 - max value - length 10
-        var name = try std.fmt.bufPrint(&name_buffer, "{d}", .{self.statement});
+        const name = try std.fmt.bufPrint(&name_buffer, "{d}", .{self.statement});
 
         var wb = try WriteBuffer.init(self.connection.allocator, 'B');
         defer wb.deinit();
@@ -416,7 +418,7 @@ pub const Statement = struct {
             if ((@typeInfo(field.type) == .Optional or @typeInfo(field.type) == .Null) and @field(args, field.name) == null) {
                 wb.writeInt(u32, @as(u32, @truncate(-1)));
             } else {
-                var encoded = try encdec.encode(self.connection.allocator, @field(args, field.name));
+                const encoded = try encdec.encode(self.connection.allocator, @field(args, field.name));
                 defer self.connection.allocator.free(encoded);
                 wb.writeInt(u32, @as(u32, @intCast(encoded.len)));
                 wb.writeBytes(encoded);
@@ -436,8 +438,8 @@ fn parseAffectedRows(command: []const u8) u32 {
 
     var tokenizer = std.mem.tokenize(u8, command, " ");
     _ = tokenizer.next(); // INSERT or SELECT
-    var second = tokenizer.next(); // 0 or affected rows
-    var maybe_last = tokenizer.next(); // affected rows or EOF
+    const second = tokenizer.next(); // 0 or affected rows
+    const maybe_last = tokenizer.next(); // affected rows or EOF
     if (maybe_last) |last| {
         return std.fmt.parseInt(u32, last, 10) catch 0;
     } else {
@@ -451,7 +453,7 @@ test "connect" {
 }
 
 test "wrong auth" {
-    var res = Connection.init(std.testing.allocator, try std.Uri.parse("postgres://testing:wrong@localhost:5432/testing"));
+    const res = Connection.init(std.testing.allocator, try std.Uri.parse("postgres://testing:wrong@localhost:5432/testing"));
     try std.testing.expectError(error.AuthenticationError, res);
 }
 
@@ -527,8 +529,8 @@ test "encoding decoding null" {
     defer conn.deinit();
     var stmt = try conn.prepare("SELECT $1, $2;");
     defer stmt.deinit();
-    var a: ?u32 = null;
-    var b: ?[]const u8 = "hi";
+    const a: ?u32 = null;
+    const b: ?[]const u8 = "hi";
     var result = try stmt.query(struct { ?u8, ?[]const u8 }, .{ a, b });
     defer result.deinit();
     try std.testing.expectEqual(@as(usize, 1), result.data.len);

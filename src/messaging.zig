@@ -9,20 +9,20 @@ pub const ReadBuffer = struct {
     }
 
     pub fn readInt(self: *ReadBuffer, comptime T: type) T {
-        var ret = std.mem.readIntBig(T, self.buf[self.pos..][0..@sizeOf(T)]);
+        const ret = std.mem.readInt(T, self.buf[self.pos..][0..@sizeOf(T)], .big);
         self.pos += @sizeOf(T);
         return ret;
     }
 
     pub fn readString(self: *ReadBuffer) []const u8 {
-        var start = self.pos;
+        const start = self.pos;
         while (self.buf[self.pos] != 0 and self.pos < self.buf.len) : (self.pos += 1) {}
         self.pos += 1;
         return self.buf[start .. self.pos - 1];
     }
 
     pub fn readBytes(self: *ReadBuffer, num: u32) []const u8 {
-        var ret = self.buf[self.pos .. self.pos + num];
+        const ret = self.buf[self.pos .. self.pos + num];
         self.pos += num;
         return ret;
     }
@@ -51,7 +51,7 @@ pub const WriteBuffer = struct {
     }
 
     pub fn writeInt(self: *WriteBuffer, comptime T: type, value: T) void {
-        self.buf.writer().writeIntBig(T, value) catch {};
+        self.buf.writer().writeInt(T, value, .big) catch {};
     }
 
     pub fn writeString(self: *WriteBuffer, string: []const u8) void {
@@ -65,9 +65,9 @@ pub const WriteBuffer = struct {
 
     pub fn finalize(self: *WriteBuffer) void {
         if (self.tag == null) {
-            std.mem.writeIntBig(u32, self.buf.items[self.index..][0..4], @as(u32, @intCast(self.buf.items.len - self.index)));
+            std.mem.writeInt(u32, self.buf.items[self.index..][0..4], @as(u32, @intCast(self.buf.items.len - self.index)), .big);
         } else {
-            std.mem.writeIntBig(u32, self.buf.items[self.index + 1 ..][0..4], @as(u32, @intCast(self.buf.items.len - self.index - 1)));
+            std.mem.writeInt(u32, self.buf.items[self.index + 1 ..][0..4], @as(u32, @intCast(self.buf.items.len - self.index - 1)), .big);
         }
     }
 
@@ -106,10 +106,10 @@ pub const Message = struct {
     pub fn read(allocator: std.mem.Allocator, reader: anytype) !Message {
         var type_and_len: [5]u8 = undefined;
         _ = try reader.read(&type_and_len);
-        var @"type" = type_and_len[0];
-        var len = std.mem.readIntBig(u32, type_and_len[1..][0..4]);
+        const @"type" = type_and_len[0];
+        const len = std.mem.readInt(u32, type_and_len[1..][0..4], .big);
         if (len > 4) {
-            var msg = try allocator.alloc(u8, len - 4);
+            const msg = try allocator.alloc(u8, len - 4);
             _ = try reader.read(msg);
             return Message{ .type = @"type", .len = len, .msg = msg };
         }
