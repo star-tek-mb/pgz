@@ -82,13 +82,22 @@ pub const Connection = struct {
             .allocator = allocator,
             .stream = undefined,
         };
-        connection.stream = try std.net.tcpConnectToHost(allocator, dsn.host orelse "localhost", dsn.port orelse 5432);
-        try connection.startup(dsn.user orelse "postgres", dsn.path[1..]);
+        const host = if (dsn.host) |h| try std.fmt.allocPrint(allocator, "{host}", .{h}) else try allocator.dupe(u8, "localhost");
+        defer allocator.free(host);
+        const user = if (dsn.user) |u| try std.fmt.allocPrint(allocator, "{user}", .{u}) else try allocator.dupe(u8, "postgres");
+        defer allocator.free(user);
+        const path = try std.fmt.allocPrintZ(allocator, "{path}", .{dsn.path});
+        defer allocator.free(path);
+
+        const password = if (dsn.password) |pa| try std.fmt.allocPrint(allocator, "{password}", .{pa}) else try allocator.dupe(u8, "");
+        defer allocator.free(password);
+        connection.stream = try std.net.tcpConnectToHost(allocator, host, dsn.port orelse 5432);
+        try connection.startup(user, path[1..]);
         while (true) {
             var msg = try Message.read(allocator, connection.stream.reader());
             defer msg.free(allocator);
             switch (msg.type) {
-                'R' => try connection.handleAuth(msg, dsn.user orelse "postgres", dsn.password orelse ""),
+                'R' => try connection.handleAuth(msg, user, password),
                 'K' => {}, // TODO: handle
                 'S' => {}, // TODO: handle
                 'Z' => break,
